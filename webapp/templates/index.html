@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Chess</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div
+    id="launch-disclaimer"
+    class="launch-disclaimer"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="launch-disclaimer-title"
+    hidden
+  >
+    <div class="launch-disclaimer__backdrop" aria-hidden="true"></div>
+    <div class="launch-disclaimer__card">
+      <h2 id="launch-disclaimer-title" class="launch-disclaimer__title">Quick note</h2>
+      <p class="launch-disclaimer__body">
+        Engine evaluations, suggested moves, the move explanations, and full-game reviews are
+        <strong>approximate</strong>. They can be wrong in messy or strategic positions. Use your own judgment;
+        treat outputs as hints, not guarantees.
+      </p>
+      <label class="launch-disclaimer__opt">
+        <input type="checkbox" id="launch-disclaimer-hide" />
+        Don&rsquo;t show this again on this device
+      </label>
+      <button type="button" id="launch-disclaimer-ok" class="control-input control-button launch-disclaimer__ok">Got it</button>
+    </div>
+  </div>
+
+  <header class="site-header">
+    <h1>AI Chess</h1>
+    <p class="tagline">Play vs Stockfish · engine analysis</p>
+    {% if not stockfish_ok %}
+    <p class="warn">Stockfish is not reachable. Install Stockfish, add it to <code>PATH</code>, or set <code>CHESS_STOCKFISH_PATH</code> in <code>.env</code> to the executable (currently: <code>{{ stockfish_path }}</code>), then restart.</p>
+    {% endif %}
+  </header>
+
+  <div class="folder-shell">
+    <div class="folder-tabs" role="tablist">
+      <button type="button" class="tab tab-active" id="tab-play" role="tab" aria-selected="true" data-panel="panel-play">Play</button>
+      <button type="button" class="tab" id="tab-analyze" role="tab" aria-selected="false" data-panel="panel-analyze">Analyze</button>
+      <button type="button" class="tab" id="tab-review" role="tab" aria-selected="false" data-panel="panel-review">Review</button>
+      <button type="button" class="tab tab--right" id="tab-about" role="tab" aria-selected="false" data-panel="panel-about">About</button>
+    </div>
+
+    <div class="folder-body">
+    <section id="panel-play" class="panel panel-active" role="tabpanel">
+      <div class="layout layout--play">
+        <div class="board-column">
+          <div class="play-panel">
+            <div class="play-panel-row play-panel-row--top">
+              <label class="play-field play-field--color">
+                <span class="play-field-label">Your color</span>
+                <select id="play-color" class="control-input control-select" aria-label="Your color">
+                  <option value="white">White</option>
+                  <option value="black">Black</option>
+                </select>
+              </label>
+              <button type="button" id="btn-new-game" class="control-input control-button play-new-btn">New game</button>
+            </div>
+            <div class="play-opponent-block">
+              <div class="play-opponent-header">
+                <span class="play-field-label">Engine (play)</span>
+                <label class="play-elo-toggle">
+                  <input type="checkbox" id="play-engine-use-elo" />
+                  <span>Limit ~Elo</span>
+                </label>
+              </div>
+              <div class="play-elo-controls" id="play-elo-controls">
+                <div class="play-elo-slider-row">
+                  <input
+                    type="range"
+                    id="play-engine-elo-slider"
+                    class="play-elo-slider"
+                    min="1320"
+                    max="2800"
+                    step="25"
+                    value="1600"
+                    aria-label="Opponent approximate Elo"
+                  />
+                  <div class="play-elo-value">
+                    <input
+                      type="number"
+                      id="play-engine-elo-input"
+                      class="control-input play-elo-input"
+                      min="1320"
+                      max="2800"
+                      step="25"
+                      value="1600"
+                      inputmode="numeric"
+                      aria-label="Elo number"
+                    />
+                    <span class="play-elo-unit" aria-hidden="true">Elo</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="play-status" class="status"></div>
+          <div class="board-with-coords">
+            <div class="board-coord-ranks" aria-hidden="true">
+              <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+            </div>
+            <div id="play-board" class="chess-board" aria-label="Chess board"></div>
+            <div class="board-coord-corner" aria-hidden="true"></div>
+            <div class="board-coord-files" aria-hidden="true">
+              <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span>
+            </div>
+          </div>
+          <p class="hint">Your turn: click a piece, then destination. Right-click or same square again to cancel.</p>
+        </div>
+        <aside class="sidebar sidebar--play">
+          <h2 class="section-title">Game</h2>
+          <p class="sidebar-note">Mate shortcut when it applies; otherwise Stockfish. Weaker play uses <strong>Limit ~Elo</strong>; analysis stays full strength.</p>
+          <details class="sidebar-details">
+            <summary>Advanced</summary>
+            <p class="sidebar-note sidebar-note--nested">Set <code>CHESS_PLAY_MATE_ORACLE=0</code> to disable the mate shortcut.</p>
+          </details>
+          <p id="play-side-info"></p>
+          <div id="play-move-list" class="move-list-scroll" aria-label="Move list"></div>
+          <div class="play-pgn-actions" role="group" aria-label="Export game">
+            <button type="button" id="btn-copy-play-pgn" class="control-input control-button play-pgn-btn" disabled>
+              Copy PGN
+            </button>
+            <a
+              id="play-pgn-download"
+              class="control-input control-button play-pgn-btn play-pgn-download play-pgn-download--disabled"
+              href="#"
+              download="game.pgn"
+              aria-disabled="true"
+              >Download .pgn</a>
+            <button type="button" id="btn-play-to-review" class="control-input control-button play-pgn-btn" disabled>
+              Open in Review
+            </button>
+          </div>
+          <p class="sidebar-note play-pgn-hint">Copy or download the PGN, or open it in <strong>Review</strong> to run a full-game analysis.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section id="panel-analyze" class="panel" role="tabpanel" hidden>
+      <div class="layout layout--analyze" id="analyze-layout">
+        <div class="analyze-main">
+          <div class="analyze-toolbar analyze-mode-only" role="group" aria-label="Analysis controls">
+            <label class="analyze-field analyze-field--fen">
+              <span class="analyze-field-label">Position</span>
+              <input type="text" id="analyze-fen" class="analyze-input fen-input" spellcheck="false" placeholder="Paste FEN or edit the board…" />
+            </label>
+            <label class="analyze-field analyze-field--side">
+              <span class="analyze-field-label">Side</span>
+              <select id="analyze-turn" class="analyze-input analyze-select" aria-label="Side to move">
+                <option value="w">White</option>
+                <option value="b">Black</option>
+              </select>
+            </label>
+            <label class="analyze-field analyze-field--strength">
+              <span class="analyze-field-label">Depth</span>
+              <select id="analyze-strength" class="analyze-input analyze-select" aria-label="Search depth preset">
+                <option value="fast" selected>Fast (32)</option>
+                <option value="balanced">Balanced (64)</option>
+                <option value="deep">Deep (128)</option>
+                <option value="extreme">Extreme (256)</option>
+                <option value="custom">Custom…</option>
+              </select>
+            </label>
+            <label class="analyze-field analyze-field--custom-sims">
+              <span class="analyze-field-label">Custom</span>
+              <input
+                type="number"
+                id="analyze-sims"
+                class="analyze-input"
+                min="8"
+                max="8192"
+                step="1"
+                value="32"
+                disabled
+                title="Simulations when Search depth is Custom"
+              />
+            </label>
+            <div class="analyze-toolbar-action">
+              <button type="button" id="btn-analyze" class="btn btn-primary btn-analyze">Analyze</button>
+            </div>
+          </div>
+          <div class="analyze-utility-row analyze-mode-only" role="group" aria-label="Board utilities">
+            <button type="button" id="btn-sync-fen" class="btn-utility" title="Load the current Play tab position">Load game</button>
+            <span class="utility-sep" aria-hidden="true">·</span>
+            <button type="button" id="btn-analyze-edit" class="btn-utility">Edit board</button>
+            <span class="utility-sep" aria-hidden="true">·</span>
+            <button type="button" id="btn-analyze-startpos" class="btn-utility">Starting position</button>
+            <span class="utility-sep" aria-hidden="true">·</span>
+            <button type="button" id="btn-analyze-clear" class="btn-utility">Clear</button>
+          </div>
+          <div class="editor-header editor-mode-only" aria-hidden="true">
+            <div class="editor-header-title">
+              <span class="editor-header-pill">Editing board</span>
+              <span class="editor-header-sub">Adjust pieces and settings in the panel on the right.</span>
+            </div>
+          </div>
+          <div id="analyze-status" class="status analyze-mode-only"></div>
+          <div class="analyze-board-row">
+            <div class="board-with-coords">
+              <div class="board-coord-ranks" aria-hidden="true">
+                <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+              </div>
+              <div id="analyze-board" class="chess-board" aria-label="Analysis board"></div>
+              <div class="board-coord-corner" aria-hidden="true"></div>
+              <div class="board-coord-files" aria-hidden="true">
+                <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span>
+              </div>
+            </div>
+          </div>
+          <p id="analyze-editor-helper" class="editor-helper editor-mode-only" aria-live="polite">
+            Drag pieces to move them, or select a piece to place.
+          </p>
+          <div id="analyze-root-eval" class="engine-status-bar analyze-mode-only" aria-live="polite"></div>
+        </div>
+        <aside class="sidebar sidebar--analyze analyze-mode-only" id="analyze-sidebar">
+          <div class="sidebar-section">
+            <h2 class="sidebar-title section-title">Top moves</h2>
+            <div class="candidate-legend" aria-hidden="true">
+              <span class="candidate-legend__move">Move</span>
+              <span class="candidate-legend__eval">Eval</span>
+              <span class="candidate-legend__share">Visit share</span>
+            </div>
+            <ul id="analyze-moves" class="move-candidates" aria-label="Candidate moves"></ul>
+            <div id="analyze-moves-more" class="candidate-more-row hidden"></div>
+          </div>
+          <hr class="sidebar-divider" />
+          <div class="sidebar-section">
+            <h3 class="pv-heading">Why this move</h3>
+            <div id="analyze-explain" class="explain-box" aria-live="polite"></div>
+          </div>
+          <hr class="sidebar-divider" />
+          <div class="sidebar-section">
+            <div class="pv-header-row">
+              <h3 class="pv-heading">Principal variation</h3>
+              <div class="pv-field-row pv-field-row--inline">
+                <select id="pv-depth" class="analyze-input analyze-select pv-depth-select" title="Plies in the variation (including the first move)" aria-label="Line length">
+                  <option value="2">2</option>
+                  <option value="4">4</option>
+                  <option value="6" selected>6</option>
+                  <option value="8">8</option>
+                  <option value="10">10</option>
+                  <option value="12">12</option>
+                  <option value="14">14</option>
+                  <option value="16">16</option>
+                </select>
+                <button type="button" id="pv-deeper" class="btn btn-ghost btn-compact" title="Two more plies">+2</button>
+              </div>
+            </div>
+            <div id="analyze-pv" class="pv-box"></div>
+          </div>
+          <hr class="sidebar-divider" />
+          <details class="sidebar-details sidebar-details--soft">
+            <summary>How to read scores</summary>
+            <p class="sidebar-note sidebar-note--nested">Multi-PV from Stockfish. Evals are in pawns (or mate). Percent is search weight.</p>
+          </details>
+        </aside>
+        <aside class="sidebar sidebar--editor editor-mode-only" id="analyze-editor-sidebar" aria-label="Board editor">
+          <div class="sidebar-section">
+            <h2 class="sidebar-title section-title">Board editor</h2>
+            <p class="sidebar-lede">Changes apply when you press Done.</p>
+          </div>
+          <div class="editor-section">
+            <div class="editor-block-label">Selected tool</div>
+            <div class="editor-selected-tool" id="editor-selected-tool" aria-live="polite">
+              <span class="editor-selected-tool-icon" id="editor-selected-tool-icon" aria-hidden="true"></span>
+              <span class="editor-selected-tool-label" id="editor-selected-tool-label">None — pick a piece or eraser</span>
+            </div>
+          </div>
+          <hr class="sidebar-divider" />
+          <div class="editor-section">
+            <div class="editor-block-label">Pieces</div>
+            <div class="editor-pieces" id="editor-pieces"></div>
+            <div class="editor-tool-row">
+              <button type="button" class="editor-tool-btn editor-tool-btn--move" id="editor-move-btn" aria-pressed="true">
+                <span class="editor-tool-icon" aria-hidden="true">✥</span>
+                <span>Move pieces</span>
+              </button>
+              <button type="button" class="editor-tool-btn editor-tool-btn--eraser" id="editor-eraser-btn" aria-pressed="false">
+                <span class="editor-tool-icon" aria-hidden="true">⌫</span>
+                <span>Eraser</span>
+              </button>
+            </div>
+          </div>
+          <hr class="sidebar-divider" />
+          <div class="editor-section">
+            <div class="editor-block-label">Position settings</div>
+            <div class="editor-field">
+              <span class="editor-inline-label">Side to move</span>
+              <div class="editor-segmented" id="editor-side-segmented" role="group" aria-label="Side to move">
+                <button type="button" class="editor-seg editor-seg--on" data-side="w">White</button>
+                <button type="button" class="editor-seg" data-side="b">Black</button>
+              </div>
+            </div>
+            <div class="editor-field">
+              <span class="editor-inline-label">Castling rights</span>
+              <div class="editor-checks" role="group" aria-label="Castling rights">
+                <label class="editor-check">
+                  <input type="checkbox" id="editor-castle-K" data-castle="K" checked />
+                  <span>White O-O</span>
+                </label>
+                <label class="editor-check">
+                  <input type="checkbox" id="editor-castle-Q" data-castle="Q" checked />
+                  <span>White O-O-O</span>
+                </label>
+                <label class="editor-check">
+                  <input type="checkbox" id="editor-castle-k" data-castle="k" checked />
+                  <span>Black O-O</span>
+                </label>
+                <label class="editor-check">
+                  <input type="checkbox" id="editor-castle-q" data-castle="q" checked />
+                  <span>Black O-O-O</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <hr class="sidebar-divider" />
+          <div class="editor-section">
+            <div id="editor-validation" class="editor-validation editor-validation--ok" role="status" aria-live="polite">Valid position.</div>
+          </div>
+          <div class="editor-actions">
+            <div class="editor-actions-secondary">
+              <button type="button" class="btn btn-ghost btn-compact" id="editor-undo" disabled title="Undo the last board change">Undo</button>
+              <button type="button" class="btn btn-ghost btn-compact" id="editor-clear">Clear board</button>
+              <button type="button" class="btn btn-ghost btn-compact" id="editor-startpos">Start position</button>
+            </div>
+            <div class="editor-actions-primary">
+              <button type="button" class="btn btn-ghost btn-compact" id="editor-cancel">Cancel</button>
+              <button type="button" class="btn btn-primary btn-compact" id="editor-done">Done</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="panel-review" class="panel" role="tabpanel" hidden>
+      <div class="review-panel">
+        <header class="review-hero">
+          <h2>Review a game</h2>
+          <p class="review-lede">
+            Paste a PGN and get per-side feedback on what went well, what went wrong, and what to work on.
+            Every move is scored against Stockfish's top choice, then common issues are grouped into themes.
+          </p>
+        </header>
+
+        <div class="review-controls">
+          <label class="review-field review-field--wide">
+            <span class="review-field-label">PGN</span>
+            <textarea
+              id="review-pgn"
+              class="review-pgn"
+              rows="8"
+              spellcheck="false"
+              placeholder='Paste PGN here, e.g.&#10;[Event "Casual Game"]&#10;[White "You"]&#10;[Black "Opponent"]&#10;&#10;1. e4 e5 2. Nf3 Nc6 ...'
+            ></textarea>
+          </label>
+
+          <div class="review-field-row">
+            <label class="review-field">
+              <span class="review-field-label">Review for</span>
+              <select id="review-side" class="review-select">
+                <option value="both" selected>Both sides</option>
+                <option value="white">White only</option>
+                <option value="black">Black only</option>
+              </select>
+            </label>
+
+            <label class="review-field">
+              <span class="review-field-label">Depth</span>
+              <select id="review-depth" class="review-select" title="Higher = slower but more accurate">
+                <option value="12">Fast (≈12)</option>
+                <option value="20" selected>Balanced (≈20)</option>
+                <option value="32">Deep (≈32)</option>
+              </select>
+            </label>
+
+            <button type="button" id="review-run" class="primary review-run-btn">Review game</button>
+          </div>
+
+          <p class="review-hint">
+            Tip: a full game takes a minute or two to review. Use <em>Fast</em> for quick passes and
+            <em>Deep</em> only for important games.
+          </p>
+        </div>
+
+        <div id="review-status" class="review-status" aria-live="polite"></div>
+
+        <div id="review-player" class="review-player" hidden>
+          <div class="review-player-board-col">
+            <div id="review-board" class="chess-board" aria-label="Review board"></div>
+            <div class="review-player-nav">
+              <button type="button" id="review-nav-first" class="review-nav-btn" aria-label="First position" title="Start (Home)">⏮</button>
+              <button type="button" id="review-nav-prev" class="review-nav-btn" aria-label="Previous move" title="Previous (←)">◀</button>
+              <span id="review-nav-label" class="review-nav-label">Start</span>
+              <button type="button" id="review-nav-next" class="review-nav-btn" aria-label="Next move" title="Next (→)">▶</button>
+              <button type="button" id="review-nav-last" class="review-nav-btn" aria-label="Last position" title="End (End)">⏭</button>
+            </div>
+            <div id="review-current-move" class="review-current-move" aria-live="polite"></div>
+          </div>
+          <div class="review-player-list-col">
+            <div class="review-section-title review-section-title--player">Move list</div>
+            <div id="review-movelist" class="review-movelist" role="list" aria-label="Game moves"></div>
+          </div>
+        </div>
+
+        <div id="review-results" class="review-results" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section id="panel-about" class="panel" role="tabpanel" hidden>
+      <div class="about-panel">
+        <header class="about-hero">
+          <h2>About this app</h2>
+          <p class="about-lede">
+            A local chess workbench for playing against <a href="https://stockfishchess.org/" target="_blank" rel="noopener">Stockfish</a>
+            and analyzing any position. See the top engine moves, step through the principal variation,
+            and get plain-English explanations of the ideas behind each move.
+          </p>
+          <p class="about-lede">
+            The short move blurbs are assembled from plain chess heuristics (material, checks, forks, and the like).
+            Stockfish and the rest of the app run on your machine.
+          </p>
+        </header>
+
+        <section class="about-section">
+          <h3>What each tab does</h3>
+          <ul>
+            <li><strong>Play</strong> — play a full game against Stockfish at a strength you choose.</li>
+            <li><strong>Analyze</strong> — paste a FEN or load your current game, and review the engine's top candidate moves with explanations.</li>
+            <li><strong>Review</strong> — paste a PGN and get per-side feedback across the whole game: accuracy, recurring issues, and your worst moments.</li>
+          </ul>
+        </section>
+
+        <section class="about-section">
+          <h3>Reading the Analyze results</h3>
+          <dl class="about-dl">
+            <dt>Top moves</dt>
+            <dd>The moves Stockfish considers strongest in this position, ranked best-first.</dd>
+
+            <dt>Eval</dt>
+            <dd>
+              How good the resulting position is for the side to move, measured in pawns.
+              <code>+1.20</code> ≈ up a pawn and change; <code>+M3</code> means mate in 3.
+            </dd>
+
+            <dt>Principal variation (PV)</dt>
+            <dd>Stockfish's expected best line after the move. Click any move in the line to jump the board to that position.</dd>
+
+            <dt>Why this move</dt>
+            <dd>
+              A short summary of the move's main ideas and drawbacks, built from patterns: checks, captures,
+              forks, development, king safety, and missed chances.
+            </dd>
+          </dl>
+          <p class="about-caveat">
+            The explainer is best for concrete ideas (checks, forks, material, development). For tricky
+            strategic positions, trust the <strong>Eval</strong> and <strong>PV</strong> most — those come straight from Stockfish.
+          </p>
+        </section>
+
+        <details class="about-details">
+          <summary>How it works (for the curious)</summary>
+          <div class="about-details-body">
+            <h4>Engine strength</h4>
+            <p>
+              In <strong>Play</strong>, the <em>Limit ~Elo</em> toggle approximates a human rating with Stockfish's own
+              strength limits (1320-3170). Stockfish's calibrated range starts around
+              <strong>~1320 Elo</strong>, so the slider
+              clamps to the actual supported range.
+            </p>
+            <p>
+              In <strong>Analyze</strong>, the <em>Depth</em> preset trades speed for accuracy
+              (<em>Fast</em> is quick and shallow; <em>Extreme</em> is slow and strong).
+            </p>
+
+            <h4>Quality labels</h4>
+            <p>
+              Each candidate is bucketed by how much evaluation it loses versus the best move:
+              <span class="about-pill about-pill--best">best</span>,
+              <span class="about-pill about-pill--excellent">excellent</span>,
+              <span class="about-pill about-pill--good">good</span>,
+              <span class="about-pill about-pill--playable">playable</span>,
+              <span class="about-pill about-pill--inaccuracy">inaccuracy</span>,
+              <span class="about-pill about-pill--mistake">mistake</span>,
+              <span class="about-pill about-pill--blunder">blunder</span>.
+              The "−N cp vs best" chip shows the centipawn loss.
+            </p>
+
+            <h4>The explainer</h4>
+            <p>
+              The "Why this move" panel runs a set of deterministic checks on the board before and after the move —
+              it looks for things like checks, forks, captures with good exchange value, castling, passed pawns,
+              opened lines, hanging pieces, and weakened king safety. <strong>Misses …</strong> bullets appear when
+              the best move had a tactic (mate, winning capture, fork) that your move didn't.
+            </p>
+
+            <h4>Where the numbers come from</h4>
+            <p>
+              Analysis comes from Stockfish, and the move explanations come from deterministic chess rules
+              that inspect the position before and after each move.
+            </p>
+          </div>
+        </details>
+      </div>
+    </section>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.min.js" crossorigin="anonymous"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
